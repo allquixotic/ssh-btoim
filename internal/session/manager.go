@@ -65,6 +65,17 @@ func (m *Manager) GetOrConnect(ctx context.Context, alias string) (*ManagedSessi
 	m.mu.RUnlock()
 
 	if exists {
+		// Check if config has changed (e.g. IP, user, port)
+		host, _ := m.resolver.Resolve(alias)
+		if host != nil && (host.HostName != ms.Host.HostName || host.User != ms.Host.User || host.Port != ms.Host.Port) {
+			log.Printf("config changed for %s (%s -> %s), reconnecting", alias, ms.Host.HostName, host.HostName)
+			m.mu.Lock()
+			delete(m.sessions, alias)
+			m.mu.Unlock()
+			ms.Client.Close()
+			return m.connect(ctx, alias)
+		}
+
 		// Check if connection is still alive
 		_, _, err := ms.Client.SendRequest("keepalive@openssh.com", true, nil)
 		if err == nil {

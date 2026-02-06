@@ -2,10 +2,13 @@ package sshconfig
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	ssh_config "github.com/kevinburke/ssh_config"
 )
@@ -20,8 +23,12 @@ type ResolvedHost struct {
 }
 
 // Resolver parses and queries ~/.ssh/config.
+// It automatically reloads the config when the file's modtime changes.
 type Resolver struct {
-	cfg *ssh_config.Config
+	mu         sync.RWMutex
+	cfg        *ssh_config.Config
+	configPath string
+	lastMod    time.Time
 }
 
 // NewResolver creates a Resolver from ~/.ssh/config.
@@ -32,27 +39,69 @@ func NewResolver() (*Resolver, error) {
 		return nil, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	configPath := filepath.Join(home, ".ssh", "config")
-	f, err := os.Open(configPath)
+	r := &Resolver{
+		configPath: filepath.Join(home, ".ssh", "config"),
+	}
+
+	if err := r.load(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// load parses the SSH config file and updates lastMod.
+func (r *Resolver) load() error {
+	info, err := os.Stat(r.configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// No SSH config — return empty resolver
-			return &Resolver{cfg: &ssh_config.Config{}}, nil
+			r.cfg = &ssh_config.Config{}
+			r.lastMod = time.Time{}
+			return nil
 		}
-		return nil, fmt.Errorf("cannot open %s: %w", configPath, err)
+		return fmt.Errorf("cannot stat %s: %w", r.configPath, err)
+	}
+
+	f, err := os.Open(r.configPath)
+	if err != nil {
+		return fmt.Errorf("cannot open %s: %w", r.configPath, err)
 	}
 	defer f.Close()
 
 	cfg, err := ssh_config.Decode(f)
 	if err != nil {
-		return nil, fmt.Errorf("cannot parse %s: %w", configPath, err)
+		return fmt.Errorf("cannot parse %s: %w", r.configPath, err)
 	}
 
-	return &Resolver{cfg: cfg}, nil
+	r.cfg = cfg
+	r.lastMod = info.ModTime()
+	return nil
+}
+
+// reloadIfChanged checks the file modtime and reloads if it changed.
+func (r *Resolver) reloadIfChanged() {
+	info, err := os.Stat(r.configPath)
+	if err != nil {
+		return
+	}
+	if info.ModTime().Equal(r.lastMod) {
+		return
+	}
+
+	log.Printf("SSH config changed, reloading")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.load(); err != nil {
+		log.Printf("failed to reload SSH config: %v", err)
+	}
 }
 
 // Resolve looks up a host alias and returns fully resolved connection parameters.
 func (r *Resolver) Resolve(alias string) (*ResolvedHost, error) {
+	r.reloadIfChanged()
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	hostname, err := r.cfg.Get(alias, "HostName")
 	if err != nil || hostname == "" {
 		hostname = alias
@@ -84,13 +133,17 @@ func (r *Resolver) Resolve(alias string) (*ResolvedHost, error) {
 
 // ListHosts returns all non-wildcard Host entries from the SSH config.
 func (r *Resolver) ListHosts() []string {
+	r.reloadIfChanged()
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	seen := make(map[string]bool)
 	var hosts []string
 
 	for _, host := range r.cfg.Hosts {
 		for _, pattern := range host.Patterns {
 			name := pattern.String()
-			// Skip wildcards and negations
 			if strings.ContainsAny(name, "*?!") {
 				continue
 			}
@@ -109,6 +162,7 @@ func (r *Resolver) ListHosts() []string {
 }
 
 // getIdentityFiles returns expanded identity file paths for the given host.
+// Caller must hold r.mu (at least RLock).
 func (r *Resolver) getIdentityFiles(alias string) []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -121,7 +175,6 @@ func (r *Resolver) getIdentityFiles(alias string) []string {
 		if strings.HasPrefix(f, "~/") {
 			f = filepath.Join(home, f[2:])
 		}
-		// Only include files that exist
 		if _, err := os.Stat(f); err == nil {
 			expanded = append(expanded, f)
 		}
