@@ -1,5 +1,6 @@
-# Build artifact
+# Build artifacts
 ssh-btoim
+*.dxt
 
 # IDE
 .idea/
