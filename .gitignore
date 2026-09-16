@@ -1,14 +1,2 @@
-# Build artifacts
-ssh-btoim
+/target
 *.dxt
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db

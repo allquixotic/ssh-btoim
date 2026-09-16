@@ -1,0 +1,38 @@
+[package]
+name = "ssh-btoim"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.89"
+description = "SSH But This One Is Mine: hardened MCP server giving LLM agents agent-authenticated SSH access"
+license = "Apache-2.0"
+
+[dependencies]
+rmcp = { version = "3.4", features = ["server", "transport-io", "macros"] }
+russh = "0.63"
+russh-sftp = "3.0"
+tokio = { version = "1.53", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"
+hmac = "0.13"
+sha1 = "0.11"
+bytes = "1"
+time = { version = "0.3", features = ["formatting"] }
+getrandom = "0.4"
+glob = "0.3"
+
+[patch.crates-io]
+russh = { path = "vendor/russh/russh" }
+
+[workspace]
+exclude = ["vendor/russh"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

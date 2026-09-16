@@ -1,0 +1,159 @@
+diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/client/kex.rs vendor/russh/russh/src/client/kex.rs
+--- /tmp/russh-src/russh/src/client/kex.rs	2026-09-16 03:16:48.851619418 -0400
++++ vendor/russh/russh/src/client/kex.rs	2026-09-16 03:28:47.512990135 -0400
+@@ -40,6 +40,8 @@
+         server_host_key: PublicKey,
+         server_host_certificate: Option<Certificate>,
+         newkeys: NewKeys,
++        server_host_key_blob: Bytes,
++        server_signature_blob: Bytes,
+     },
+ }
+ 
+@@ -173,6 +175,8 @@
+                         server_host_certificate: None,
+                         newkeys,
+                         server_host_key: None,
++                        server_host_key_blob: None,
++                        server_signature_blob: None,
+                     });
+                 }
+ 
+@@ -328,6 +332,7 @@
+                 })?;
+ 
+                 let signature = Bytes::decode(r)?;
++                let server_signature_blob = signature.clone();
+                 let mut signature_reader = &signature[..];
+                 let signature = Signature::decode(&mut signature_reader)?;
+                 ensure_end(&signature_reader)?;
+@@ -359,6 +364,8 @@
+                     server_host_key,
+                     server_host_certificate,
+                     newkeys,
++                    server_host_key_blob,
++                    server_signature_blob,
+                 };
+ 
+                 Ok(KexProgress::NeedsReply {
+@@ -370,6 +377,8 @@
+                 server_host_key,
+                 server_host_certificate,
+                 newkeys,
++                server_host_key_blob,
++                server_signature_blob,
+             } => {
+                 // At this point the exchange is complete
+                 // and we're waiting for a KEWKEYS packet
+@@ -393,6 +402,8 @@
+                     server_host_certificate,
+                     newkeys,
+                     server_host_key: Some(server_host_key),
++                    server_host_key_blob: Some(server_host_key_blob),
++                    server_signature_blob: Some(server_signature_blob),
+                 })
+             }
+         }
+diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/client/mod.rs vendor/russh/russh/src/client/mod.rs
+--- /tmp/russh-src/russh/src/client/mod.rs	2026-09-16 03:16:48.851619418 -0400
++++ vendor/russh/russh/src/client/mod.rs	2026-09-16 03:28:47.514532651 -0400
+@@ -1852,6 +1852,8 @@
+                     server_host_key,
+                     server_host_certificate,
+                     newkeys,
++                    server_host_key_blob,
++                    server_signature_blob,
+                 } => {
+                     debug!("kex impl has completed");
+                     session.common.strict_kex =
+@@ -1902,6 +1904,17 @@
+                             }
+                         }
+ 
++                        // The host key has been accepted; give the handler what
++                        // an OpenSSH agent needs to bind this session
++                        // (session-bind@openssh.com) before authentication.
++                        if let (Some(blob), Some(sig)) =
++                            (server_host_key_blob, server_signature_blob)
++                        {
++                            handler
++                                .kex_binding(&blob, &newkeys.session_id, &sig, session)
++                                .await?;
++                        }
++
+                         session
+                             .common
+                             .encrypted(initial_encrypted_state(session), newkeys);
+@@ -2376,6 +2389,25 @@
+         async { Ok(false) }
+     }
+ 
++    /// Called once, after the initial key exchange has been verified and
++    /// `check_server_key` accepted the host key, with the material an OpenSSH
++    /// agent needs for the `session-bind@openssh.com` extension: the host key
++    /// blob exactly as the server sent it, the session identifier, and the
++    /// server's signature over the exchange hash. Not called on re-keys.
++    ///
++    /// Binding the agent connection lets destination-constrained keys
++    /// (`ssh-add -h user@host`) be used for authentication.
++    #[allow(unused_variables)]
++    fn kex_binding(
++        &mut self,
++        server_host_key_blob: &[u8],
++        session_id: &[u8],
++        server_signature: &[u8],
++        session: &mut Session,
++    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
++        async { Ok(()) }
++    }
++
+     /// Called when key exchange has completed.
+     ///
+     /// This callback provides access to the raw shared secret from the KEX,
+diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/kex/mod.rs vendor/russh/russh/src/kex/mod.rs
+--- /tmp/russh-src/russh/src/kex/mod.rs	2026-09-16 03:16:48.852482314 -0400
++++ vendor/russh/russh/src/kex/mod.rs	2026-09-16 03:28:47.510651578 -0400
+@@ -26,6 +26,8 @@
+ use std::fmt::Debug;
+ use std::sync::LazyLock;
+ 
++use bytes::Bytes;
++
+ use curve25519::Curve25519KexType;
+ use delegate::delegate;
+ use dh::groups::DhGroup;
+@@ -130,6 +132,13 @@
+         /// question unasked.
+         server_host_certificate: Option<Certificate>,
+         newkeys: NewKeys,
++        /// The host key blob exactly as the server sent it in the KEX reply
++        /// (client side, initial exchange only). Together with the session
++        /// identifier and `server_signature_blob` this is what an OpenSSH
++        /// agent needs for `session-bind@openssh.com`.
++        server_host_key_blob: Option<Bytes>,
++        /// The server's signature over the exchange hash, as sent on the wire.
++        server_signature_blob: Option<Bytes>,
+     },
+ }
+ 
+diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/server/kex.rs vendor/russh/russh/src/server/kex.rs
+--- /tmp/russh-src/russh/src/server/kex.rs	2026-09-16 03:16:48.853804599 -0400
++++ vendor/russh/russh/src/server/kex.rs	2026-09-16 03:28:47.511189185 -0400
+@@ -163,6 +163,8 @@
+                         server_host_certificate: None,
+                         newkeys,
+                         server_host_key: None,
++                        server_host_key_blob: None,
++                        server_signature_blob: None,
+                     });
+                 }
+ 
+@@ -399,6 +401,8 @@
+                     server_host_certificate: None,
+                     newkeys,
+                     server_host_key: None,
++                    server_host_key_blob: None,
++                    server_signature_blob: None,
+                 })
+             }
+         }

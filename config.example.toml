@@ -1,0 +1,41 @@
+# ssh-btoim configuration.
+# Copy to ~/.config/ssh-btoim/config.toml (or point --config / $SSH_BTOIM_CONFIG at it).
+# Everything here is decided by you, never by the model calling the tools.
+
+# The ssh-agent socket that holds the granted key. Use a fixed path that a
+# human-run grant script creates, not $SSH_AUTH_SOCK.
+agent_socket = "~/.ssh/agent.sock"
+
+# Pre-verified host keys. The file is read-only for this server: unknown or
+# changed keys are refused, and the server will not start if it is empty.
+known_hosts = "~/.ssh/known_hosts"
+
+# Concrete `Host` aliases from the SSH config that may be contacted. Anything
+# else is denied before any network activity. Wildcards are not allowed.
+allowed_hosts = ["web-01", "db-01"]
+
+# Shown to the model when no grant is active, so it can tell the user what to
+# do instead of trying other credentials.
+# grant_hint = "run my-grant-script from a terminal"
+
+# OpenSSH client config used to resolve aliases (HostName, User, Port,
+# HostKeyAlias). ProxyJump/ProxyCommand hosts are refused.
+# ssh_config = "~/.ssh/config"
+
+# Append-only JSONL audit trail of every tool call.
+# audit_log = "~/.local/state/ssh-btoim/audit.jsonl"
+
+# Where large command output is spilled (a private per-process subdirectory
+# is created). Default: $XDG_RUNTIME_DIR, else /tmp.
+# temp_dir = "/run/user/1000"
+
+# Timeouts and limits (seconds / bytes).
+connect_timeout_secs = 10
+max_connection_age_secs = 3600      # absolute lifetime of a connection
+idle_timeout_secs = 900             # close after this much inactivity
+default_command_timeout_secs = 300
+max_command_timeout_secs = 3600
+max_output_bytes = 524288           # hard cap captured per stream
+default_inline_bytes = 16384        # larger output goes to a spill file
+max_upload_bytes = 8388608
+revoke_check_interval_secs = 15     # how often the agent grant is re-checked
