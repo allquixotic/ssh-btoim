@@ -1934,6 +1934,7 @@ dependencies = [
  "getrandom",
  "glob",
  "hmac",
+ "libc",
  "rmcp",
  "russh",
  "russh-sftp",

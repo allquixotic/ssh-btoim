@@ -3,7 +3,7 @@
 //! Output above the inline limit is written to a per-process directory
 //! (mode 0700, files 0600) and the response carries a head/tail preview plus
 //! the path. Directories left behind by crashed instances are removed at
-//! startup when their owning PID is gone.
+//! startup when their owning PID is gone (checked with `kill(pid, 0)`).
 
 use std::fs;
 use std::io::Write;
@@ -81,7 +81,7 @@ impl OutputHandler {
             if !meta.is_dir() || meta.uid() != my_uid {
                 continue;
             }
-            if Path::new("/proc").join(pid.to_string()).exists() {
+            if pid_alive(pid) {
                 continue;
             }
             let p = entry.path();
@@ -251,6 +251,22 @@ pub fn append_capped(buf: &mut Vec<u8>, data: &[u8], cap: usize) -> bool {
     }
 }
 
+/// Whether a process with this PID exists. Uses `kill(pid, 0)` rather than
+/// `/proc`, which macOS lacks; EPERM still means the PID is in use.
+fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 performs only the existence and permission check.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +275,34 @@ mod tests {
         let base = std::env::temp_dir().join(format!("ssh-btoim-out-test-{}", random_id()));
         fs::create_dir_all(&base).unwrap();
         OutputHandler::new(Some(&base)).unwrap()
+    }
+
+    #[test]
+    fn pid_liveness() {
+        assert!(pid_alive(std::process::id()));
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!pid_alive(pid));
+    }
+
+    #[test]
+    fn live_sibling_dir_survives_cleanup() {
+        let base = std::env::temp_dir().join(format!("ssh-btoim-out-test-{}", random_id()));
+        fs::create_dir_all(&base).unwrap();
+        let mut sibling = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let live = base.join(format!("{DIR_PREFIX}{}", sibling.id()));
+        fs::create_dir(&live).unwrap();
+        let _h = OutputHandler::new(Some(&base)).unwrap();
+        assert!(live.exists(), "a running instance's spill dir was removed");
+        sibling.kill().ok();
+        sibling.wait().ok();
+        let _h2 = OutputHandler::new(Some(&base)).unwrap();
+        assert!(!live.exists(), "an orphaned spill dir was kept");
+        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
