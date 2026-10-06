@@ -65,12 +65,30 @@ hostname, port, identity, known_hosts file or SSH option.
 ## Build and install
 
 ```sh
-cargo build --release
-install -m 755 target/release/ssh-btoim ~/.local/bin/
+make test                        # unit tests + install/signature check
+make install                     # PREFIX defaults to ~/.local
 mkdir -p ~/.config/ssh-btoim
 cp config.example.toml ~/.config/ssh-btoim/config.toml   # then edit it
-ssh-btoim --check
+~/.local/bin/ssh-btoim --check
 ```
+
+`make install` runs `cargo build --release`, copies the binary to a new,
+uniquely named file `$PREFIX/libexec/ssh-btoim/ssh-btoim-<UTC time>-<pid>`,
+and then atomically points the symlink `$PREFIX/bin/ssh-btoim` at it. The
+versioned file is never renamed or rebuilt in place, so running MCP servers
+keep their executable and the next launch picks up the new one. Older
+versions are left in `libexec` for you to prune. `make install PREFIX=...`
+accepts relative paths and `~/`. To install a prebuilt binary (for example
+from a cross build), run `scripts/install.sh ~/.local/bin/ssh-btoim
+path/to/ssh-btoim`.
+
+On macOS the installed file is re-signed ad hoc (`codesign --force --sign -`)
+at its final path, verified with `codesign --verify --strict`, checked for the
+absence of the linker's `linker-signed` flag, and stripped of
+`com.apple.quarantine` and `com.apple.provenance`. Codex's `taskgated` killed
+binaries that carried only the linker signature or were rebuilt in place at a
+path it had already seen. Do not copy `target/release/ssh-btoim` over the
+installed command by hand.
 
 `--check` validates the config, resolves every allowed alias through the SSH
 config, and confirms the trust store is non-empty.
@@ -79,6 +97,15 @@ config, and confirms the trust store is non-empty.
 
 ```sh
 claude mcp add --transport stdio --scope user ssh-btoim -- ~/.local/bin/ssh-btoim
+```
+
+### Codex
+
+In `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.ssh-btoim]
+command = "/Users/you/.local/bin/ssh-btoim"
 ```
 
 ### Claude Desktop
@@ -120,6 +147,7 @@ Logging goes to stderr (`SSH_BTOIM_LOG=debug` for protocol-level detail).
 
 ```sh
 cargo test            # unit tests
+make test             # unit tests + install/signature check in a temp prefix
 tests/e2e.sh          # end to end: throwaway sshd + constrained agent key
 ```
 
