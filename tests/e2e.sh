@@ -134,7 +134,9 @@ printf 'wrongbox %s\n' "$(cut -d' ' -f1,2 "$work/otherkey.pub")" >> "$work/known
 eval "$(ssh-agent -a "$work/agent2.sock" -s)" >/dev/null
 agent2_pid=$SSH_AGENT_PID
 SSH_AUTH_SOCK="$work/agent2.sock" ssh-add -q -H "$work/known_hosts" -h "$me@wrongbox" "$work/clientkey"
-sed -i "s#/agent\\.sock\"#/agent2.sock\"#" "$work/config.toml"
+# Portable in-place edit: BSD sed (macOS) and GNU sed disagree on `-i`.
+sed "s#/agent\\.sock\"#/agent2.sock\"#" "$work/config.toml" > "$work/config.toml.new"
+mv "$work/config.toml.new" "$work/config.toml"
 E2E_MODE=wrong-destination python3 "$here/e2e_driver.py"
 
 echo "== audit log:"

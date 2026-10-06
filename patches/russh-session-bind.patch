@@ -1,7 +1,8 @@
-diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/client/kex.rs vendor/russh/russh/src/client/kex.rs
---- /tmp/russh-src/russh/src/client/kex.rs	2026-09-16 03:16:48.851619418 -0400
-+++ vendor/russh/russh/src/client/kex.rs	2026-09-16 03:28:47.512990135 -0400
-@@ -40,6 +40,8 @@
+diff --git a/russh/src/client/kex.rs b/russh/src/client/kex.rs
+index cad0d81..72bbd99 100644
+--- a/russh/src/client/kex.rs
++++ b/russh/src/client/kex.rs
+@@ -40,6 +40,8 @@ enum ClientKexState {
          server_host_key: PublicKey,
          server_host_certificate: Option<Certificate>,
          newkeys: NewKeys,
@@ -10,7 +11,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
      },
  }
  
-@@ -173,6 +175,8 @@
+@@ -173,6 +175,8 @@ impl ClientKex {
                          server_host_certificate: None,
                          newkeys,
                          server_host_key: None,
@@ -19,7 +20,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
                      });
                  }
  
-@@ -328,6 +332,7 @@
+@@ -328,6 +332,7 @@ impl ClientKex {
                  })?;
  
                  let signature = Bytes::decode(r)?;
@@ -27,7 +28,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
                  let mut signature_reader = &signature[..];
                  let signature = Signature::decode(&mut signature_reader)?;
                  ensure_end(&signature_reader)?;
-@@ -359,6 +364,8 @@
+@@ -359,6 +364,8 @@ impl ClientKex {
                      server_host_key,
                      server_host_certificate,
                      newkeys,
@@ -36,7 +37,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
                  };
  
                  Ok(KexProgress::NeedsReply {
-@@ -370,6 +377,8 @@
+@@ -370,6 +377,8 @@ impl ClientKex {
                  server_host_key,
                  server_host_certificate,
                  newkeys,
@@ -45,7 +46,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
              } => {
                  // At this point the exchange is complete
                  // and we're waiting for a KEWKEYS packet
-@@ -393,6 +402,8 @@
+@@ -393,6 +402,8 @@ impl ClientKex {
                      server_host_certificate,
                      newkeys,
                      server_host_key: Some(server_host_key),
@@ -54,10 +55,11 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
                  })
              }
          }
-diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/client/mod.rs vendor/russh/russh/src/client/mod.rs
---- /tmp/russh-src/russh/src/client/mod.rs	2026-09-16 03:16:48.851619418 -0400
-+++ vendor/russh/russh/src/client/mod.rs	2026-09-16 03:28:47.514532651 -0400
-@@ -1852,6 +1852,8 @@
+diff --git a/russh/src/client/mod.rs b/russh/src/client/mod.rs
+index c70ccea..face294 100644
+--- a/russh/src/client/mod.rs
++++ b/russh/src/client/mod.rs
+@@ -1972,6 +1972,8 @@ async fn reply<H: Handler>(
                      server_host_key,
                      server_host_certificate,
                      newkeys,
@@ -66,7 +68,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
                  } => {
                      debug!("kex impl has completed");
                      session.common.strict_kex =
-@@ -1902,6 +1904,17 @@
+@@ -2021,6 +2023,17 @@ async fn reply<H: Handler>(
                              }
                          }
  
@@ -84,7 +86,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
                          session
                              .common
                              .encrypted(initial_encrypted_state(session), newkeys);
-@@ -2376,6 +2389,25 @@
+@@ -2731,6 +2744,25 @@ pub trait Handler: Sized + Send {
          async { Ok(false) }
      }
  
@@ -110,10 +112,11 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/cli
      /// Called when key exchange has completed.
      ///
      /// This callback provides access to the raw shared secret from the KEX,
-diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/kex/mod.rs vendor/russh/russh/src/kex/mod.rs
---- /tmp/russh-src/russh/src/kex/mod.rs	2026-09-16 03:16:48.852482314 -0400
-+++ vendor/russh/russh/src/kex/mod.rs	2026-09-16 03:28:47.510651578 -0400
-@@ -26,6 +26,8 @@
+diff --git a/russh/src/kex/mod.rs b/russh/src/kex/mod.rs
+index bdc0619..de8af52 100644
+--- a/russh/src/kex/mod.rs
++++ b/russh/src/kex/mod.rs
+@@ -26,6 +26,8 @@ use std::convert::TryFrom;
  use std::fmt::Debug;
  use std::sync::LazyLock;
  
@@ -122,7 +125,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/kex
  use curve25519::Curve25519KexType;
  use delegate::delegate;
  use dh::groups::DhGroup;
-@@ -130,6 +132,13 @@
+@@ -130,6 +132,13 @@ pub(crate) enum KexProgress<T> {
          /// question unasked.
          server_host_certificate: Option<Certificate>,
          newkeys: NewKeys,
@@ -136,10 +139,11 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/kex
      },
  }
  
-diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/server/kex.rs vendor/russh/russh/src/server/kex.rs
---- /tmp/russh-src/russh/src/server/kex.rs	2026-09-16 03:16:48.853804599 -0400
-+++ vendor/russh/russh/src/server/kex.rs	2026-09-16 03:28:47.511189185 -0400
-@@ -163,6 +163,8 @@
+diff --git a/russh/src/server/kex.rs b/russh/src/server/kex.rs
+index fbe2745..adf8cb8 100644
+--- a/russh/src/server/kex.rs
++++ b/russh/src/server/kex.rs
+@@ -163,6 +163,8 @@ impl ServerKex {
                          server_host_certificate: None,
                          newkeys,
                          server_host_key: None,
@@ -148,7 +152,7 @@ diff -ru -x .git -x bench.sh -x rust-toolchain.toml /tmp/russh-src/russh/src/ser
                      });
                  }
  
-@@ -399,6 +401,8 @@
+@@ -399,6 +401,8 @@ impl ServerKex {
                      server_host_certificate: None,
                      newkeys,
                      server_host_key: None,

@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
-use crate::{map_err, msg, ChannelId, Disconnect, Pty, Sig};
+use crate::{ChannelId, CryptoVec, Disconnect, Pty, Sig, map_err, msg};
 
 impl Session {
     fn channel_open_generic<F>(
@@ -412,6 +412,34 @@ impl Session {
         Ok(())
     }
 
+    /// Sends a global request with a custom name to the server.
+    ///
+    /// `data` is appended verbatim after the request name and want-reply flag.
+    /// If `reply_channel` is not None, sets want_reply and returns the server's
+    /// response-specific data via the channel, [`Some`] on success or [`None`]
+    /// on failure.
+    pub fn send_global_request(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<Option<CryptoVec>>>,
+        name: &str,
+        data: &[u8],
+    ) -> Result<(), crate::Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests
+                    .push_back(crate::session::GlobalRequestResponse::Other(reply_channel));
+            }
+            push_packet!(enc.write, {
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                name.encode(&mut enc.write)?;
+                (want_reply as u8).encode(&mut enc.write)?;
+                enc.write.extend_from_slice(data);
+            });
+        }
+        Ok(())
+    }
+
     pub fn send_keepalive(&mut self, want_reply: bool) -> Result<(), crate::Error> {
         self.open_global_requests
             .push_back(crate::session::GlobalRequestResponse::Keepalive);
@@ -451,7 +479,47 @@ impl Session {
         Ok(())
     }
 
-    pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), crate::Error> {
+    /// Asks the server to prove it holds the private half of each host key it announced through `hostkeys-00@openssh.com` (`hostkeys-prove-00@openssh.com`).
+    ///
+    /// DANGER: reply channel may not be awaited while the Session is borrowed, as it will deadlock.
+    pub(crate) fn request_hostkeys_prove(
+        &mut self,
+        reply_channel: oneshot::Sender<Result<(), crate::Error>>,
+        keys: Vec<crate::keys::PublicKey>,
+    ) -> Result<(), crate::Error> {
+        if keys.is_empty() {
+            // Nothing to prove; skip the round trip.
+            let _ = reply_channel.send(Ok(()));
+            return Ok(());
+        }
+        let key_blobs = keys
+            .iter()
+            .map(crate::keys::PublicKey::to_bytes)
+            .collect::<Result<Vec<_>, _>>()?;
+        let Some(ref mut enc) = self.common.encrypted else {
+            return Ok(());
+        };
+        self.open_global_requests
+            .push_back(crate::session::GlobalRequestResponse::HostKeysProve {
+                return_channel: reply_channel,
+                keys,
+            });
+        push_packet!(enc.write, {
+            msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+            "hostkeys-prove-00@openssh.com".encode(&mut enc.write)?;
+            1u8.encode(&mut enc.write)?;
+            for key_blob in &key_blobs {
+                key_blob.as_slice().encode(&mut enc.write)?;
+            }
+        });
+        Ok(())
+    }
+
+    pub fn data(
+        &mut self,
+        channel: ChannelId,
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), crate::Error> {
         let is_rekeying = self.kex.active();
         let common = &mut self.common;
         if let Some(enc) = common.encrypted.as_mut() {
@@ -486,7 +554,13 @@ impl Session {
         let is_rekeying = self.kex.active();
         let common = &mut self.common;
         if let Some(enc) = common.encrypted.as_mut() {
-            enc.extended_data_with_writer(&mut common.packet_writer, channel, ext, data, is_rekeying)
+            enc.extended_data_with_writer(
+                &mut common.packet_writer,
+                channel,
+                ext,
+                data,
+                is_rekeying,
+            )
         } else {
             unreachable!()
         }
