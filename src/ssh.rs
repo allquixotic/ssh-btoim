@@ -365,8 +365,9 @@ async fn authenticate(
     debug!("agent offers {} identit(ies) for this session", ids.len());
     if ids.is_empty() {
         bail!(
-            "the agent offers no key usable for {}@{lookup}; the grant is expired, revoked, or not scoped to this host",
-            host.user
+            "the agent offers no key usable for {}@{lookup}; the grant is expired, revoked, or not scoped to this host. Authorization is locked: {}",
+            host.user,
+            cfg.grant_hint
         );
     }
 
@@ -408,9 +409,10 @@ async fn authenticate(
         }
     }
     bail!(
-        "authentication for {}@{} failed: the agent refused to sign or the server rejected every offered key",
+        "authentication for {}@{} failed: the agent refused to sign or the server rejected every offered key. If the grant does not cover this host: {}",
         host.user,
-        host.alias
+        host.alias,
+        cfg.grant_hint
     )
 }
 
